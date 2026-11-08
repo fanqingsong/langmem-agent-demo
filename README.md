@@ -1,214 +1,101 @@
 # LangMem Agent Demo
 
-A demonstration of LangGraph agents with persistent memory using LangMem, DeepSeek for chat, and Ollama for embeddings. Includes both in-memory and Redis-backed implementations.
+A demonstration of four agent memory types with LangMem, LangGraph, DeepSeek for chat, and Ollama for embeddings. The same demo runs against an in-memory store or Redis.
+
+| Memory | What it keeps | Where it lives | Scope |
+| --- | --- | --- | --- |
+| Working | Current thread transcript, plus one active-task profile | Checkpointer, and `("working", user_id, thread_id)` | This thread only |
+| Semantic | Durable facts such as name and display preference | `("semantic", user_id)` | Across threads |
+| Episodic | A past situation, the reasoning, the action, and the result | `("episodic", user_id)` | Across threads |
+| Procedural | The system instructions the agent follows | `("procedural", user_id)` key `instructions` | Across threads |
+
+LangMem has no separate working-memory API. The checkpointer is the thread transcript. A `create_memory_store_manager` with `enable_inserts=False` keeps the single working profile. Semantic facts and episodes use their own store managers. Procedural memory uses `create_prompt_optimizer` (`kind="prompt_memory"`) and is rewritten only when the user gives behavioral feedback.
+
+Each turn reads all four memories into the system prompt, answers, then writes working, semantic, and episodic memories. A feedback turn also rewrites the procedural instructions. The reply on that turn still uses the previous instructions; the next thread uses the updated ones.
 
 ## Prerequisites
 
 - **uv**: Python package manager ([install guide](https://docs.astral.sh/uv/getting-started/installation/))
 - **Ollama**: For local embeddings ([install guide](https://ollama.ai/download))
-- **Redis**: For persistent memory (Docker or local install)
+- **Redis 8**: For persistent memory (RedisJSON and RediSearch)
 - **DeepSeek API Key**: Get one from [DeepSeek Platform](https://platform.deepseek.com/api_keys)
 
 ## Setup
 
-1. **Clone and navigate to project:**
-
-   ```bash
-   cd langmem-agent-demo
-   ```
-
-2. **Install dependencies:**
+1. **Install dependencies:**
 
    ```bash
    uv sync
    ```
 
-3. **Pull the embedding model:**
+2. **Start Redis and pull the embedding model:**
 
    ```bash
-   ollama pull nomic-embed-text
+   docker compose up -d redis ollama
+   docker compose up ollama-pull
    ```
 
-4. **Set up DeepSeek API key** (choose one method):
+   `ollama-pull` downloads `nomic-embed-text` (768 dimensions) and exits.
 
-   - **Option A**: Add to `.env` file in project root:
-
-     ```bash
-     DEEPSEEK_API_KEY=your-api-key-here
-     ```
-
-   - **Option B**: Add to shell profile (`~/.bashrc` or `~/.zshrc`):
-
-     ```bash
-     export DEEPSEEK_API_KEY=your-api-key-here
-     ```
-
-5. **Start Redis** (for persistent memory):
+3. **Set the DeepSeek API key** in `.env`:
 
    ```bash
-   docker run -d --name langmem-redis -p 6379:6379 redis:latest
+   DEEPSEEK_API_KEY=your-api-key-here
    ```
+
+   `.env.example` lists the optional `REDIS_URI` and `OLLAMA_BASE_URL` overrides.
 
 ## Run
 
-### Option 1: In-Memory (Ephemeral)
+### In-memory
 
 ```bash
 uv run agent.py
 ```
 
-Memory is lost when the script exits.
+The store and checkpointer disappear when the process exits.
 
-### Option 2: Redis (Persistent)
+### Redis
 
 ```bash
 uv run agent_redis.py
 ```
 
-Running this script twice demonstrates the usage of persistent memory by the agent that we wrote:
+Or run the same script inside Compose:
 
 ```bash
-# Example first run:
-uv run agent_redis.py
-
-🔴 Using Redis for persistent memory storage
-📡 Connecting to Redis at redis://localhost:6379
-
-11:22:48 langgraph.store.redis INFO   Redis standalone client detected for RedisStore.
-11:22:48 langgraph.checkpoint.redis INFO   Redis client is a standalone client
-/Users/vasilegorcinschi/persorepo/langmem-agent-demo/agent_redis.py:61: LangGraphDeprecatedSinceV10: create_react_agent has been moved to `langchain.agents`. Please update your import to `from langchain.agents import create_agent`. Deprecated in LangGraph V1.0 to be removed in V2.0.
-  agent = create_react_agent(
-============================================================
-First interaction (thread-a):
-============================================================
-11:22:50 httpx INFO   HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-11:22:51 httpx INFO   HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
-Agent: I don't currently have any information stored about your display mode preferences. You haven't told me your preferred display settings yet.
-
-Would you like to share your display mode preference with me? For example, you might prefer:
-- Light mode
-- Dark mode
-- Auto/adaptive mode
-- High contrast mode
-- Specific color schemes
-...
-============================================================
-✅ Memory persisted in Redis!
-💡 Tip: Restart this script and the agent will remember!
-============================================================
-
-# Second run of the same script (Redis still running)
-uv run agent_redis.py
-...
-============================================================
-First interaction (thread-a):
-============================================================
-11:27:16 httpx INFO   HTTP Request: POST http://127.0.0.1:11434/api/embed "HTTP/1.1 200 OK"
-11:27:17 httpx INFO   HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
-Agent: Yes! I remember that you prefer **dark display mode**. I saved this preference in my memory, so I'll always know you like dark mode for our conversations.
-...
+docker compose run --rm agent
 ```
 
-### View Redis Memories
+The script plays three scenes for user `demo-user`:
 
-```bash
-# View all stored memories and checkpoints
-redis-cli
-127.0.0.1:6379> KEYS *
- 1) "write_keys_zset:thread-a::1f0b4db2-460b-6aa2-8002-85cd57f7f991"
- 2) "checkpoint:thread-a:__empty__:1f0b4db2-5f05-6abc-8004-9131a8788fd0"
- 3) "write_keys_zset:thread-a::1f0b4db2-5fcb-6ea6-8005-970e4262831b"
- 4) "checkpoint_write:thread-b:__empty__:1f0b4db2-788c-61d4-bfff-f173bc7b11ef:435b2051-dd4c-1e96-1504-f1d77296d22b:0"
- 5) "write_keys_zset:thread-a::1f0b4db2-1222-66e6-bfff-f63de648e026"
- 6) "checkpoint:thread-a:__empty__:1f0b4db2-5fcb-6ea6-8005-970e4262831b"
- 7) "write_keys_zset:thread-a::1f0b4db2-1225-6a9e-8000-1592e4e218a1"
- 8) "store_vectors:01K8R919NNY9M8WNF6CP8B1A30"
- 9) "checkpoint_write:thread-a:__empty__:1f0b4db2-460d-60a0-8003-3b891
- ...
+1. **thread-a:** Alex prefers dark mode and asks what a binary tree is, mentioning family trees.
+2. **thread-a:** The analogy worked. From now on, teach with analogies and keep answers short. This turn updates procedural memory.
+3. **thread-b:** Ask what a hash map is, given that Python dictionaries are familiar, and ask which display mode they prefer.
 
-# Check the contents for a specific key
-redis-cli JSON.GET "checkpoint:thread-a:__empty__:1f0b4db2-5fcb-6ea6-8005-970e4262831b" | jq .
-{
-  "thread_id": "thread-a",
-  "checkpoint_ns": "__empty__",
-  "checkpoint_id": "1f0b4db2-5fcb-6ea6-8005-970e4262831b",
-  "parent_checkpoint_id": "1f0b4db2-5f05-6abc-8004-9131a8788fd0",
-  "checkpoint_ts": 1761751377665.546,
-  "checkpoint": {
-    "type": "json",
-    "v": 4,
-    "ts": "2025-10-29T15:22:57.664353+00:00",
-    "id": "1f0b4db2-5fcb-6ea6-8005-970e4262831b",
-    "channel_values": {
-      "messages": [
-        {
-          "lc": 1,
-          "type": "constructor",
-          "id": [
-            "langchain",
-            "schema",
-            "messages",
-            "HumanMessage"
-          ],
-          "kwargs": {
-            "content": "Know which display mode I prefer?",
-            "type": "human",
-            "id": "9b167956-3362-4556-a4e4-8ce32b444e3b"
-          }
-        },
-        {
-          "lc": 1,
-          "type": "constructor",
-          "id": [
-            "langchain",
-            "schema",
-            "messages",
-            "AIMessage"
-          ],
-          "kwargs": {
-            "content": "I don't currently have any information stored about your display mode preferences. You haven't told me your preferred display settings yet.\n\nWould you like to share your display mode preference with me? For example, you might prefer:\n- Light mode\n- Dark mode  \n- Auto/adaptive mode\n- High contrast mode\n- Specific color schemes\n\nOnce you tell me your preference, I can remember it for future conversations!",
-            "additional_kwargs": {
-              ...
-```
+After each scene the script prints a memory board:
+
+- Working memory shows this thread's transcript and active profile. thread-b does not keep thread-a's goal.
+- Semantic memory keeps facts such as the name and dark-mode preference.
+- Episodic memory keeps a reusable teaching episode when one was worth saving.
+- Procedural memory prints the current instructions. Scene 3 uses the instructions rewritten in scene 2.
+
+Run `uv run agent_redis.py` a second time while Redis is still up. Semantic facts, episodes, and the rewritten instructions are still in the store. Working profiles stay on the thread id they were written under.
 
 ## Architecture
 
-### In-Memory Implementation (`agent.py`)
+Both entrypoints call `memory_demo.demo`. `memory_demo.runtime` opens either `InMemoryStore` + `MemorySaver` or `RedisStore` + `RedisSaver`. The Redis clients stay open until the demo finishes.
 
-- **Chat Model**: DeepSeek (`deepseek-chat`)
-- **Embeddings**: Ollama (`nomic-embed-text`, 768 dimensions)
-- **Memory Store**: `InMemoryStore` (ephemeral)
-- **Checkpointer**: `MemorySaver` (ephemeral)
+`memory_demo.agent` compiles a two-node graph:
 
-### Redis Implementation (`agent_redis.py`)
+1. `chat` searches the store and calls DeepSeek.
+2. `reflect` runs the LangMem store managers, and the prompt optimizer when the latest user message is behavioral feedback.
 
-- **Chat Model**: DeepSeek (`deepseek-chat`)
-- **Embeddings**: Ollama (`nomic-embed-text`, 768 dimensions)
-- **Memory Store**: `RedisStore` (persistent, with vector search)
-- **Checkpointer**: `RedisSaver` (persistent)
-- **Connection**: `redis://localhost:6379`
+Chat model: DeepSeek `deepseek-chat`. Embeddings: Ollama `nomic-embed-text`.
 
-## Project Goals
+## Project goals
 
 - [x] Basic agent with memory using `InMemoryStore`
 - [x] Replace `InMemoryStore` with Redis for persistent memory
-- [ ] Investigate Valkey compatibility as Redis alternative
-
-## Redis Integration Details
-
-The Redis implementation uses:
-
-- **`langgraph-checkpoint-redis`**: Official Redis integration for LangGraph
-- **RedisJSON**: For storing structured data
-- **RediSearch**: For vector search capabilities (included in Redis 8.0+)
-
-Memory is stored in two types of keys:
-
-- `store_vectors:..`: Long-term memories (cross-thread)
-- `checkpoint:<thread_id>:...`: Conversation state (thread-specific)
-
-## Notes
-
-- The deprecation warning for `create_react_agent` is expected and will be addressed in a future update
-- NumPy is recommended for better vector operation performance
-- Redis Stack or Redis 8.0+ is required for full functionality (includes RedisJSON and RediSearch modules)
+- [x] Demonstrate working, semantic, episodic, and procedural memory with LangMem
+- [ ] Investigate Valkey compatibility as a Redis alternative
