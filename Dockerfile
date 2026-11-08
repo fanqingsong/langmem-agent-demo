@@ -15,7 +15,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-COPY memory_demo ./memory_demo
-COPY agent.py agent_redis.py main.py ./
+COPY src ./src
+COPY agent.py ./
 
-CMD ["uv", "run", "agent_redis.py"]
+CMD ["uv", "run", "agent.py"]

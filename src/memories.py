@@ -2,7 +2,7 @@ from langchain_deepseek import ChatDeepSeek
 from langgraph.store.base import BaseStore
 from langmem import create_memory_store_manager, create_prompt_optimizer
 
-from memory_demo.schemas import (
+from src.schemas import (
     INITIAL_INSTRUCTIONS,
     Episode,
     SemanticFact,
@@ -98,8 +98,10 @@ def build_managers(store: BaseStore):
     return working, semantic, episodic, procedural
 
 
-def namespace(kind: str, user_id: str, thread_id: str) -> tuple[str, ...]:
+def namespace(kind: str, user_id: str, thread_id: str | None = None) -> tuple[str, ...]:
     if kind == "working":
+        if not thread_id:
+            raise ValueError("working memory is scoped to a thread")
         return ("working", user_id, thread_id)
     if kind in {"semantic", "episodic", "procedural"}:
         return (kind, user_id)
@@ -112,10 +114,10 @@ def is_feedback(text: str) -> bool:
 
 
 def load_instructions(store: BaseStore, user_id: str) -> str:
-    item = store.get(namespace("procedural", user_id, ""), "instructions")
+    item = store.get(namespace("procedural", user_id), "instructions")
     if item is None:
         store.put(
-            namespace("procedural", user_id, ""),
+            namespace("procedural", user_id),
             "instructions",
             {"instructions": INITIAL_INSTRUCTIONS},
         )
@@ -125,7 +127,7 @@ def load_instructions(store: BaseStore, user_id: str) -> str:
 
 def save_instructions(store: BaseStore, user_id: str, instructions: str) -> None:
     store.put(
-        namespace("procedural", user_id, ""),
+        namespace("procedural", user_id),
         "instructions",
         {"instructions": instructions},
     )

@@ -7,7 +7,7 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.store.base import BaseStore
 from langgraph.types import Checkpointer
 
-from memory_demo.memories import (
+from src.memories import (
     USER_ID,
     build_managers,
     is_feedback,
@@ -42,6 +42,11 @@ def _render(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, default=str)
 
 
+def _render_items(items: list[Any]) -> str:
+    rendered = "\n\n".join(_render(_payload(item)) for item in items)
+    return rendered or "(empty)"
+
+
 def build_system_prompt(store: BaseStore, config: RunnableConfig, user_text: str) -> str:
     configurable = config.get("configurable", {})
     user_id = configurable.get("user_id", USER_ID)
@@ -50,18 +55,18 @@ def build_system_prompt(store: BaseStore, config: RunnableConfig, user_text: str
 
     working_items = store.search(namespace("working", user_id, thread_id), limit=5)
     semantic_items = store.search(
-        namespace("semantic", user_id, thread_id),
+        namespace("semantic", user_id),
         query=user_text,
         limit=5,
     )
     episode_items = store.search(
-        namespace("episodic", user_id, thread_id),
+        namespace("episodic", user_id),
         query=user_text,
         limit=3,
     )
 
-    working = "\n\n".join(_render(_payload(item)) for item in working_items) or "(empty)"
-    semantic = "\n\n".join(_render(_payload(item)) for item in semantic_items) or "(empty)"
+    working = _render_items(working_items)
+    semantic = _render_items(semantic_items)
 
     episodes = []
     for index, item in enumerate(episode_items, start=1):
@@ -169,25 +174,18 @@ def format_memory_board(
     sections.append("Thread transcript (checkpointer):")
     sections.append("\n".join(transcript) or "(empty)")
     sections.append("Active profile:")
-    working_items = store.search(namespace("working", user_id, thread_id), limit=5)
     sections.append(
-        "\n\n".join(_render(_payload(item)) for item in working_items) or "(empty)"
+        _render_items(store.search(namespace("working", user_id, thread_id), limit=5))
     )
 
     sections.append("\n## Semantic memory")
-    semantic_items = store.search(namespace("semantic", user_id, thread_id), limit=20)
-    sections.append(
-        "\n\n".join(_render(_payload(item)) for item in semantic_items) or "(empty)"
-    )
+    sections.append(_render_items(store.search(namespace("semantic", user_id), limit=20)))
 
     sections.append("\n## Episodic memory")
-    episode_items = store.search(namespace("episodic", user_id, thread_id), limit=20)
-    sections.append(
-        "\n\n".join(_render(_payload(item)) for item in episode_items) or "(empty)"
-    )
+    sections.append(_render_items(store.search(namespace("episodic", user_id), limit=20)))
 
     sections.append("\n## Procedural memory")
-    item = store.get(namespace("procedural", user_id, thread_id), "instructions")
+    item = store.get(namespace("procedural", user_id), "instructions")
     if item is None:
         sections.append("(empty)")
     else:

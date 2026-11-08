@@ -1,6 +1,6 @@
 # LangMem Agent Demo
 
-A demonstration of four agent memory types with LangMem, LangGraph, DeepSeek for chat, and Ollama for embeddings. The same demo runs against an in-memory store or Redis.
+A demonstration of four agent memory types with LangMem, LangGraph, DeepSeek for chat, Ollama for embeddings, and Redis for persistence.
 
 | Memory | What it keeps | Where it lives | Scope |
 | --- | --- | --- | --- |
@@ -47,18 +47,8 @@ Each turn reads all four memories into the system prompt, answers, then writes w
 
 ## Run
 
-### In-memory
-
 ```bash
 uv run agent.py
-```
-
-The store and checkpointer disappear when the process exits.
-
-### Redis
-
-```bash
-uv run agent_redis.py
 ```
 
 Or run the same script inside Compose:
@@ -80,13 +70,13 @@ After each scene the script prints a memory board:
 - Episodic memory keeps a reusable teaching episode when one was worth saving.
 - Procedural memory prints the current instructions. Scene 3 uses the instructions rewritten in scene 2.
 
-Run `uv run agent_redis.py` a second time while Redis is still up. Semantic facts, episodes, and the rewritten instructions are still in the store. Working profiles stay on the thread id they were written under.
+Run `uv run agent.py` a second time while Redis is still up. Semantic facts, episodes, and the rewritten instructions are still in the store. Working profiles stay on the thread id they were written under.
 
 ## Architecture
 
-Both entrypoints call `memory_demo.demo`. `memory_demo.runtime` opens either `InMemoryStore` + `MemorySaver` or `RedisStore` + `RedisSaver`. The Redis clients stay open until the demo finishes.
+`agent.py` is the entrypoint. It plays the scripted conversations. `src.runtime` opens `RedisStore` and `RedisSaver` and keeps both clients open until the run finishes.
 
-`memory_demo.agent` compiles a two-node graph:
+`src.graph` compiles a two-node graph:
 
 1. `chat` searches the store and calls DeepSeek.
 2. `reflect` runs the LangMem store managers, and the prompt optimizer when the latest user message is behavioral feedback.
@@ -95,7 +85,5 @@ Chat model: DeepSeek `deepseek-chat`. Embeddings: Ollama `nomic-embed-text`.
 
 ## Project goals
 
-- [x] Basic agent with memory using `InMemoryStore`
-- [x] Replace `InMemoryStore` with Redis for persistent memory
-- [x] Demonstrate working, semantic, episodic, and procedural memory with LangMem
+- [x] Persist working, semantic, episodic, and procedural memory in Redis with LangMem
 - [ ] Investigate Valkey compatibility as a Redis alternative
