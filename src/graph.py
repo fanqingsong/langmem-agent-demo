@@ -7,7 +7,7 @@ from langgraph.store.base import BaseStore
 from langgraph.types import Checkpointer
 
 from src.memory import build_managers
-from src.memory import episodic, procedural, semantic, short_term, working
+from src.memory import episodic, procedural, semantic, short_term
 from src.memory.common import scope_from
 
 INITIAL_INSTRUCTIONS = """You are a helpful assistant.
@@ -32,9 +32,8 @@ def latest_user_text(messages: list[Any]) -> str:
 
 
 def build_system_prompt(store: BaseStore, config: RunnableConfig, user_text: str) -> str:
-    user_id, thread_id = scope_from(config)
+    user_id = scope_from(config)[0]
     procedural_text = procedural.render(store, user_id)
-    working_text = working.render(store, user_id, thread_id)
     semantic_text = semantic.render(store, user_id, query=user_text, limit=5)
     episodic_text = episodic.render(store, user_id, query=user_text, limit=3)
 
@@ -45,18 +44,12 @@ Use each memory for its own job:
 - Procedural rules decide how you respond.
 - Semantic facts are durable truths about the user.
 - Episodic memories are past experiences to imitate when the situation is similar.
-- Working context is the active task profile in this thread.
 Do not claim to remember anything that is not in the messages or these sections.
 
 ## Procedural memory
 <procedural>
 {procedural_text}
 </procedural>
-
-## Working memory
-<working>
-{working_text}
-</working>
 
 ## Semantic memory
 <semantic>
@@ -71,10 +64,8 @@ Do not claim to remember anything that is not in the messages or these sections.
 
 
 def build_graph(store: BaseStore, checkpointer: Checkpointer):
-    working_manager, semantic_manager, episode_manager, procedural_manager = build_managers(
-        store
-    )
-    model = working_manager.model
+    semantic_manager, episode_manager, procedural_manager = build_managers(store)
+    model = semantic_manager.model
 
     def chat(state: MessagesState, config: RunnableConfig) -> dict:
         user_text = latest_user_text(state["messages"])
@@ -88,7 +79,6 @@ def build_graph(store: BaseStore, checkpointer: Checkpointer):
 
     def reflect(state: MessagesState, config: RunnableConfig) -> dict:
         payload = {"messages": state["messages"]}
-        working_manager.invoke(payload, config)
         semantic_manager.invoke(payload, config)
         episode_manager.invoke(payload, config)
         procedural_manager.invoke(payload, config)
@@ -106,14 +96,10 @@ def build_graph(store: BaseStore, checkpointer: Checkpointer):
 def format_memory_board(
     store: BaseStore,
     user_id: str,
-    thread_id: str,
     messages: list[Any],
 ) -> str:
     sections = ["## Short-term memory"]
     sections.append(short_term.render(messages))
-
-    sections.append("\n## Working memory")
-    sections.append(working.render(store, user_id, thread_id))
 
     sections.append("\n## Semantic memory")
     sections.append(semantic.render(store, user_id, limit=20))

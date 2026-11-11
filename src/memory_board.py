@@ -17,8 +17,8 @@ from langgraph.store.redis import RedisStore
 
 from src.memory.common import payload
 
-KINDS = ("short_term", "working", "semantic", "episodic", "procedural")
-STORE_KINDS = ("working", "semantic", "episodic", "procedural")
+KINDS = ("short_term", "semantic", "episodic", "procedural")
+STORE_KINDS = ("semantic", "episodic", "procedural")
 SEARCH_LIMIT = 50
 
 
@@ -148,7 +148,7 @@ def _text(message: Any) -> str:
 
 def _title(kind: str, value: Any) -> str:
     if isinstance(value, dict):
-        for key in ("content", "instruction", "goal", "observation"):
+        for key in ("content", "instruction", "observation"):
             text = value.get(key)
             if isinstance(text, str) and text.strip():
                 return text.strip()

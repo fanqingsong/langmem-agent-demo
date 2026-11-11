@@ -58,7 +58,7 @@ def main() -> None:
                 )
                 print(f"Agent: {response['messages'][-1].content}\n")
                 print("-" * 60)
-                print(format_memory_board(store, USER_ID, thread_id, response["messages"]))
+                print(format_memory_board(store, USER_ID, response["messages"]))
                 print()
     except Exception as exc:
         print(f"\nError: {exc}")
@@ -71,7 +71,7 @@ def main() -> None:
     print("=" * 60)
     print("Semantic, episodic, and procedural memories stay in Redis.")
     print("Run this script again and those memories are still there.")
-    print("Short-term memory and the working profile stay on their own thread.")
+    print("Short-term memory stays on its own thread.")
     print("=" * 60)
 
 

@@ -14,7 +14,7 @@ from src.runtime import open_runtime
 
 load_dotenv()
 
-THREAD_SCOPED = ("short_term", "working")
+THREAD_SCOPED = ("short_term",)
 
 
 class ChatRequest(BaseModel):
@@ -84,8 +84,6 @@ def _visible(kind: str, item: dict[str, Any], thread_id: str, user_id: str) -> b
     namespace = item.get("namespace") or []
     if kind == "short_term":
         return item.get("key") == thread_id
-    if kind == "working":
-        return namespace[:3] == ["working", user_id, thread_id]
     if kind in KINDS and kind not in THREAD_SCOPED:
         return len(namespace) >= 2 and namespace[1] == user_id
     return False
