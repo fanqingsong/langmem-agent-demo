@@ -1,8 +1,10 @@
+from typing import Any
+
 from pydantic import BaseModel, Field
 from langgraph.store.base import BaseStore
 from langmem import create_memory_store_manager
 
-from src.memory.common import render_items
+from src.memory.common import payload, render_items
 
 INSTRUCTIONS = """Extract durable facts about the user.
 
@@ -42,9 +44,40 @@ def manager(model, store: BaseStore):
     )
 
 
+def is_meta(value: Any) -> bool:
+    """Extraction sometimes stores a note that nothing was learned. That note is not a fact."""
+    if isinstance(value, dict):
+        text = value.get("content")
+    else:
+        text = value
+    if not isinstance(text, str):
+        return False
+    lowered = text.lower()
+    return any(
+        phrase in lowered
+        for phrase in (
+            "no durable fact",
+            "no facts were",
+            "nothing to remember",
+            "do not extract",
+            "were not provided in this conversation",
+            "transient task",
+        )
+    )
+
+
+def drop_meta(store: BaseStore, user_id: str) -> None:
+    scope = namespace(user_id)
+    for item in store.search(scope, limit=50):
+        if is_meta(payload(item)):
+            store.delete(scope, item.key)
+
+
 def render(store: BaseStore, user_id: str, query: str | None = None, limit: int = 5) -> str:
+    drop_meta(store, user_id)
     if query:
         items = store.search(namespace(user_id), query=query, limit=limit)
     else:
         items = store.search(namespace(user_id), limit=limit)
-    return render_items(items)
+    kept = [item for item in items if not is_meta(payload(item))]
+    return render_items(kept)

@@ -31,6 +31,22 @@ def _index(embeddings: OllamaEmbeddings) -> dict:
     }
 
 
+def _escape_tag(value: str) -> str:
+    """RediSearch treats '-' in a tag query as an operator. UUID keys need escaping."""
+    return value.replace("\\", "\\\\").replace("-", "\\-")
+
+
+def _patch_store_delete(store: BaseStore) -> None:
+    original = store.delete
+
+    def delete(namespace: tuple[str, ...], key: str) -> None:
+        if isinstance(key, str):
+            key = _escape_tag(key)
+        original(namespace, key)
+
+    store.delete = delete  # type: ignore[method-assign]
+
+
 @contextmanager
 def open_runtime() -> Iterator[tuple[BaseStore, Checkpointer]]:
     """Open Redis store and checkpointer and keep them alive for the demo."""
@@ -40,4 +56,5 @@ def open_runtime() -> Iterator[tuple[BaseStore, Checkpointer]]:
     ):
         store.setup()
         checkpointer.setup()
+        _patch_store_delete(store)
         yield store, checkpointer

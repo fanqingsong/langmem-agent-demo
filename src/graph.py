@@ -79,6 +79,7 @@ def build_graph(store: BaseStore, checkpointer: Checkpointer):
 
     def reflect(state: MessagesState, config: RunnableConfig) -> dict:
         payload = {"messages": state["messages"]}
+        semantic.drop_meta(store, scope_from(config)[0])
         semantic_manager.invoke(payload, config)
         episode_manager.invoke(payload, config)
         procedural_manager.invoke(payload, config)

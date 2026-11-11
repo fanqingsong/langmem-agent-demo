@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from src.graph import build_graph
+from src.memory import semantic
 from src.memory.common import USER_ID
 from src.memory_board import KINDS, snapshot
 from src.runtime import open_runtime
@@ -62,6 +63,7 @@ def chat(body: ChatRequest) -> dict[str, str]:
 
 @app.get("/api/memories")
 def memories(thread_id: str, user_id: str = USER_ID) -> dict[str, Any]:
+    semantic.drop_meta(app.state.store, user_id)
     board = snapshot(app.state.store, app.state.checkpointer)
     items = {
         kind: [

@@ -46,12 +46,30 @@ def manager(model, store: BaseStore):
     )
 
 
+def _meta_rule(value: Any) -> bool:
+    if isinstance(value, dict):
+        text = value.get("instruction")
+    else:
+        text = value
+    if not isinstance(text, str):
+        return False
+    lowered = text.lower()
+    return "do not extract" in lowered or "no durable rule" in lowered
+
+
 def list_items(store: BaseStore, user_id: str) -> list[Item]:
     scope = namespace(user_id)
     # Earlier builds stored one rewritten prompt under this key.
     if store.get(scope, "instructions") is not None:
         store.delete(scope, "instructions")
-    return store.search(scope, limit=20)
+    items = store.search(scope, limit=20)
+    kept = []
+    for item in items:
+        if _meta_rule(payload(item)):
+            store.delete(scope, item.key)
+            continue
+        kept.append(item)
+    return kept
 
 
 def render(store: BaseStore, user_id: str) -> str:
