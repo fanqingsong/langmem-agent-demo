@@ -6,10 +6,12 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "langchain>=1.0.2",
-    "langchain-deepseek>=1.0.0",
+    "langchain-openai>=1.0.0",
     "langchain-ollama>=1.0.0",
     "langgraph-checkpoint-redis>=0.1.2",
     "langmem>=0.0.30",
     "numpy>=2.3.4",
     "python-dotenv>=1.2.1",
+    "fastapi>=0.162.4",
+    "uvicorn>=0.54.0",
 ]

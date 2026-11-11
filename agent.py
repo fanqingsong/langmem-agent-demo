@@ -4,7 +4,8 @@ from dotenv import load_dotenv
 from langchain_core.runnables import RunnableConfig
 
 from src.graph import build_graph, format_memory_board
-from src.memories import USER_ID
+from src.memory import USER_ID
+from src.memory.common import siliconflow_base_url, siliconflow_model
 from src.runtime import ollama_base_url, open_runtime, redis_uri
 
 SCENES = (
@@ -30,12 +31,13 @@ SCENES = (
 
 def main() -> None:
     load_dotenv()
-    if not os.getenv("DEEPSEEK_API_KEY"):
+    if not os.getenv("SILICONFLOW_API_KEY"):
         raise SystemExit(
-            "DEEPSEEK_API_KEY is required. Put it in a .env file or export it before starting."
+            "SILICONFLOW_API_KEY is required. Put it in a .env file or export it before starting."
         )
 
     print(f"\nRedis: {redis_uri()}")
+    print(f"Chat model: {siliconflow_model()} at {siliconflow_base_url()}")
     print(f"Embeddings: Ollama nomic-embed-text at {ollama_base_url()}")
     print(f"User namespace: {USER_ID}\n")
 
@@ -69,7 +71,7 @@ def main() -> None:
     print("=" * 60)
     print("Semantic, episodic, and procedural memories stay in Redis.")
     print("Run this script again and those memories are still there.")
-    print("Working memory stays on its own thread and does not carry the other thread's goal.")
+    print("Short-term memory and the working profile stay on their own thread.")
     print("=" * 60)
 
 

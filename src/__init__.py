@@ -1,1 +1,1 @@
-"""Four-type agent memory built on LangMem and LangGraph."""
+"""Agent memory built on LangMem and LangGraph."""

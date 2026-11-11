@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>记忆对话</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f3efe6;
+    --ink: #1e1a16;
+    --muted: #6f675e;
+    --line: #ddd4c6;
+    --card: #fffdf8;
+    --user: #efe6d6;
+    --assistant: #fffdf8;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font: 15px/1.5 "Iowan Old Style", Palatino, "Songti SC", serif;
+    color: var(--ink);
+    background: var(--bg);
+  }
+  .app {
+    height: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+  }
+  .chat, .memory { min-height: 0; display: flex; flex-direction: column; }
+  .chat { border-right: 1px solid var(--line); }
+  header, .composer, .memory-head {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--line);
+  }
+  h1 { margin: 0; font-size: 22px; font-weight: 600; }
+  .sub, .meta { color: var(--muted); font-family: ui-sans-serif, sans-serif; font-size: 12px; }
+  .thread {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    font-family: ui-sans-serif, sans-serif;
+  }
+  input, button, textarea {
+    font: inherit;
+    color: var(--ink);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+  input, button { font-family: ui-sans-serif, sans-serif; font-size: 13px; }
+  input { padding: 6px 8px; min-width: 0; flex: 1; }
+  button { padding: 6px 12px; cursor: pointer; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  #messages, #kinds { overflow: auto; padding: 16px 20px; }
+  #messages { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+  .bubble { max-width: 80%; padding: 8px 12px; border: 1px solid var(--line); border-radius: 12px; }
+  .bubble.user { align-self: flex-end; background: var(--user); }
+  .bubble.assistant { align-self: flex-start; background: var(--assistant); }
+  .bubble .role { font-family: ui-sans-serif, sans-serif; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+  .composer { display: flex; gap: 8px; border-bottom: 0; border-top: 1px solid var(--line); }
+  textarea { flex: 1; resize: none; min-height: 44px; padding: 8px 10px; }
+  .memory-head { display: flex; justify-content: space-between; align-items: end; }
+  #kinds { display: flex; flex-direction: column; gap: 10px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+  h2 { margin: 0 0 6px; font-size: 15px; display: flex; justify-content: space-between; }
+  h2 span { color: var(--muted); font-family: ui-sans-serif, sans-serif; font-size: 12px; font-weight: 500; }
+  article { border-top: 1px solid var(--line); padding: 8px 0; }
+  .title { font-weight: 600; }
+  pre { white-space: pre-wrap; word-break: break-word; margin: 4px 0 0; font: 13px/1.45 ui-monospace, monospace; }
+  .msg { margin: 4px 0; }
+  .error { margin: 8px 20px 0; color: #9d2c2c; font-family: ui-sans-serif, sans-serif; font-size: 13px; }
+  @media (max-width: 860px) {
+    .app { grid-template-columns: 1fr; height: auto; }
+    .chat { min-height: 70vh; border-right: 0; border-bottom: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <section class="chat">
+    <header>
+      <h1>对话</h1>
+      <div class="sub">同一线程会接上上次的消息。换线程后，短期记忆和工作记忆跟着换。</div>
+      <div class="thread">
+        <input id="thread" aria-label="线程" spellcheck="false">
+        <button id="new-thread" type="button">新线程</button>
+      </div>
+    </header>
+    <div id="error" class="error" role="alert"></div>
+    <div id="messages"></div>
+    <form class="composer" id="composer">
+      <textarea id="input" rows="2" placeholder="说点什么" required></textarea>
+      <button id="send" type="submit">发送</button>
+    </form>
+  </section>
+  <aside class="memory">
+    <div class="memory-head">
+      <div>
+        <h1>记忆</h1>
+        <div class="sub" id="memory-status">正在读取</div>
+      </div>
+    </div>
+    <div id="kinds"></div>
+  </aside>
+</div>
+<script>
+const LABELS = {
+  short_term: "短期记忆",
+  working: "工作记忆",
+  semantic: "语义记忆",
+  episodic: "情景记忆",
+  procedural: "程序性记忆",
+};
+const threadInput = document.getElementById("thread");
+const messagesEl = document.getElementById("messages");
+const kindsEl = document.getElementById("kinds");
+const errorEl = document.getElementById("error");
+const sendButton = document.getElementById("send");
+const inputEl = document.getElementById("input");
+
+function threadId() {
+  return threadInput.value.trim() || "thread";
+}
+
+function newThreadId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(4));
+  return "thread-" + [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function renderBody(body) {
+  if (Array.isArray(body) && body.every((row) => row && typeof row.content === "string")) {
+    return body.map((row) => `<div class="msg"><span class="role">${escapeHtml(row.role)}</span> ${escapeHtml(row.content)}</div>`).join("") || `<div class="meta">空</div>`;
+  }
+  if (body && typeof body === "object") return `<pre>${escapeHtml(JSON.stringify(body, null, 2))}</pre>`;
+  if (body == null || body === "") return `<div class="meta">空</div>`;
+  return `<pre>${escapeHtml(body)}</pre>`;
+}
+
+function renderChat(messages) {
+  messagesEl.innerHTML = messages.map((row) => `
+    <div class="bubble ${row.role === "user" ? "user" : "assistant"}">
+      <div class="role">${escapeHtml(row.role)}</div>
+      <div>${escapeHtml(row.content)}</div>
+    </div>`).join("") || `<div class="meta">这条线程还没有消息。</div>`;
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function renderMemories(feed) {
+  kindsEl.innerHTML = Object.keys(LABELS).map((kind) => {
+    const items = (feed.items && feed.items[kind]) || [];
+    const cards = items.map((item) => `
+      <article>
+        <div class="title">${escapeHtml(item.title || item.key)}</div>
+        ${renderBody(item.body)}
+      </article>`).join("");
+    return `<section><h2>${LABELS[kind]} <span>${items.length}</span></h2>${cards || `<div class="meta">还没有记录</div>`}</section>`;
+  }).join("");
+  const total = Object.values(feed.counts || {}).reduce((sum, n) => sum + n, 0);
+  document.getElementById("memory-status").textContent = `${threadId()} · ${total} 条`;
+}
+
+async function loadMemories() {
+  const response = await fetch(`/api/memories?thread_id=${encodeURIComponent(threadId())}&user_id=demo-user`, { cache: "no-store" });
+  const feed = await response.json();
+  if (!response.ok) throw new Error(feed.detail || "读取记忆失败");
+  renderMemories(feed);
+  const shortTerm = (feed.items.short_term || [])[0];
+  renderChat(Array.isArray(shortTerm && shortTerm.body) ? shortTerm.body : []);
+}
+
+async function switchThread(id) {
+  threadInput.value = id;
+  sessionStorage.setItem("thread_id", id);
+  errorEl.textContent = "";
+  await loadMemories();
+}
+
+threadInput.value = sessionStorage.getItem("thread_id") || newThreadId();
+sessionStorage.setItem("thread_id", threadInput.value);
+
+document.getElementById("new-thread").addEventListener("click", () => {
+  switchThread(newThreadId()).catch((err) => { errorEl.textContent = String(err.message || err); });
+});
+threadInput.addEventListener("change", () => {
+  switchThread(threadId()).catch((err) => { errorEl.textContent = String(err.message || err); });
+});
+
+document.getElementById("composer").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const message = inputEl.value.trim();
+  if (!message) return;
+  errorEl.textContent = "";
+  sendButton.disabled = true;
+  inputEl.value = "";
+  const pending = messagesEl.querySelector(".meta") ? [] : [...messagesEl.querySelectorAll(".bubble")].map((node) => ({
+    role: node.classList.contains("user") ? "user" : "assistant",
+    content: node.lastElementChild.textContent,
+  }));
+  renderChat([...pending, { role: "user", content: message }, { role: "assistant", content: "正在回复…" }]);
+  try {
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, thread_id: threadId(), user_id: "demo-user" }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || "发送失败");
+    await loadMemories();
+  } catch (err) {
+    errorEl.textContent = String(err.message || err);
+    await loadMemories().catch(() => {});
+  } finally {
+    sendButton.disabled = false;
+    inputEl.focus();
+  }
+});
+
+loadMemories().catch((err) => { errorEl.textContent = String(err.message || err); });
+</script>
+</body>
+</html>

@@ -18,4 +18,4 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY src ./src
 COPY agent.py ./
 
-CMD ["uv", "run", "agent.py"]
+CMD ["uv", "run", "uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "8000"]
