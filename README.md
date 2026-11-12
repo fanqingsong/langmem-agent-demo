@@ -148,14 +148,80 @@ Restart the agent process and leave Redis running (`docker compose restart agent
 
 ## Architecture
 
-`frontend` is nginx. It serves the chat page and proxies `/api/` to the `agent` service. `src.api` keeps `RedisStore` and `RedisSaver` open and serves `POST /api/chat` and `GET /api/memories`. `agent.py` plays the scripted conversations against the same graph.
+The browser talks only to nginx. The agent process owns the graph, and Redis is the only durable store.
 
-Each memory type is its own module under `src.memory`. `short_term` reads the checkpointer transcript and trims it before the model call. `semantic`, `episodic`, and `procedural` each own a schema, extraction instructions, namespace, store manager, and rendering. `src.graph` compiles a two-node graph:
+```mermaid
+flowchart LR
+  browser["Browser"] --> nginx["frontend<br/>nginx :8080"]
+  nginx -->|"/"| page["Chat page"]
+  nginx -->|"/api/"| api["agent<br/>FastAPI :8000"]
+  script["agent.py"] --> graph["src.graph"]
+  api --> graph
+  graph --> saver["RedisSaver<br/>thread transcript"]
+  graph --> store["RedisStore<br/>facts, episodes, rules"]
+  saver --> redis["Redis 8"]
+  store --> redis
+  graph --> chatModel["SiliconFlow<br/>DeepSeek-V3.2"]
+  store --> embed["Ollama<br/>nomic-embed-text"]
+```
 
-1. `chat` reads the thread transcript and asks each store-backed module for its memory, then calls the SiliconFlow chat model.
-2. `reflect` asks each store manager to write. The checkpointer saves the new messages with the thread. The procedural manager inserts, updates, and deletes response rules.
+`frontend` serves the chat page and proxies `/api/` to `agent`. `src.api` keeps `RedisStore` and `RedisSaver` open for the process lifetime and serves `POST /api/chat` and `GET /api/memories`. `agent.py` runs the same compiled graph as a script. Chat calls SiliconFlow (`deepseek-ai/DeepSeek-V3.2`, override with `SILICONFLOW_MODEL`). Store search embeds the query with Ollama `nomic-embed-text` (768 dimensions, cosine).
 
-Chat model: SiliconFlow `deepseek-ai/DeepSeek-V3.2` (override with `SILICONFLOW_MODEL`). Embeddings: Ollama `nomic-embed-text`.
+### One turn
+
+`src.graph` is two nodes. The checkpointer writes the new messages when the run finishes. `reflect` does not add a message.
+
+```mermaid
+sequenceDiagram
+  participant Caller as API or agent.py
+  participant Chat as chat
+  participant Reflect as reflect
+  participant Saver as RedisSaver
+  participant Store as RedisStore
+  participant Model as SiliconFlow
+
+  Caller->>Chat: user message, thread_id, user_id
+  Saver-->>Chat: this thread's messages
+  Store-->>Chat: procedural rules, semantic facts, episodes
+  Note over Chat: trim transcript to 4,000 tokens
+  Chat->>Model: system prompt plus trimmed messages
+  Model-->>Chat: reply
+  Chat->>Reflect: thread messages including the reply
+  Reflect->>Store: insert, update, or delete memories
+  Saver->>Saver: checkpoint the thread
+```
+
+1. `chat` loads the thread transcript, renders procedural, semantic, and episodic memory into the system prompt, trims the transcript, and calls the chat model.
+2. `reflect` runs the three store managers on the full message list. Procedural memory can insert, update, or delete a rule. Semantic and episodic managers write only when the turn contains a fact or a reusable episode.
+
+### Where each memory lives
+
+```mermaid
+flowchart TB
+  subgraph thread ["This thread only"]
+    short["short_term<br/>checkpoint key = thread_id"]
+  end
+  subgraph user ["This user, every thread"]
+    sem["semantic<br/>namespace semantic, user_id"]
+    epi["episodic<br/>namespace episodic, user_id"]
+    pro["procedural<br/>namespace procedural, user_id"]
+  end
+  short --> model["Prompt the model sees"]
+  sem --> model
+  epi --> model
+  pro --> model
+```
+
+| Module | Read on `chat` | Write on `reflect` |
+| --- | --- | --- |
+| `src.memory.short_term` | Latest transcript that fits 4,000 tokens | Checkpointer appends the turn; the module does not write the store |
+| `src.memory.semantic` | Up to 5 facts, searched by the user text | Durable facts such as name and preference |
+| `src.memory.episodic` | Up to 3 episodes, searched by the user text | A situation, the action, and the result |
+| `src.memory.procedural` | The current rule text | Insert, update, or delete response rules |
+
+The base system prompt stays in `src.graph`. Each store-backed module owns its schema, extraction instructions, namespace, manager, and rendering. A rule written on this turn is in the store for the next turn, including a turn on another `thread_id` for the same `user_id`.
+
+How those store documents are embedded, written, and recalled is described in [docs/redis-memory.md](docs/redis-memory.md).
 
 ## Project goals
 
